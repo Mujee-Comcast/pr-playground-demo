@@ -16,7 +16,8 @@ body {
   gap: 16px;
   padding: 24px;
   background: #fff;
-  border: 1px solid #d0d7de;
+  border: 2px solid #8250df;
+  box-shadow: 0 8px 24px rgba(140, 149, 159, 0.2);
   border-radius: 6px;
 }
 
@@ -39,9 +40,9 @@ body {
 .card button {
   margin-top: 12px;
   padding: 6px 12px;
-  border: 1px solid #d0d7de;
+  border: 1px solid #ddd;
   border-radius: 6px;
-  background: #f6f8fa;
+  background: #ddd;
   cursor: pointer;
 }
 

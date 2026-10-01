@@ -8,8 +8,8 @@ export function ProfileCard({ user }: { user: User }) {
         <h2>
           {user.firstName} {user.lastName}
         </h2>
-        Role: <p>{user.company.title}</p>
-        Email: <p className="muted">{user.email}</p>
+        <p>{user.company.title}</p>
+        <p className="muted">{user.email}</p>
         <button type="button">Update Profile</button>
       </div>
     </section>

@@ -1,0 +1,132 @@
+name: PR Playground
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+concurrency:
+  group: playground-${{ github.event.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write # push dist to gh-pages
+  checks: write # "Playground" check run
+  deployments: write # "View deployment" button on the PR
+  pull-requests: write
+
+jobs:
+  playground:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute preview URL
+        id: url
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          PR: ${{ github.event.number }}
+        run: echo "preview=https://${OWNER,,}.github.io/${REPO}/pr-preview/pr-${PR}/" >> "$GITHUB_OUTPUT"
+
+      - name: Start Playground check
+        id: check
+        if: github.event.action != 'closed'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.checks.create({
+              ...context.repo,
+              name: 'Playground',
+              head_sha: context.payload.pull_request.head.sha,
+              status: 'in_progress',
+              output: { title: 'Building preview', summary: 'The PR build is running.' },
+            });
+            core.setOutput('id', data.id);
+
+      - uses: actions/setup-node@v4
+        if: github.event.action != 'closed'
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Build
+        if: github.event.action != 'closed'
+        env:
+          VITE_API_BASE_URL: ${{ vars.DEV_API_BASE_URL || 'https://dummyjson.com' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          npm ci
+          npm test --if-present
+          npm run build
+          echo "$HEAD_SHA" > dist/playground-sha.txt
+
+      # Deploys dist/ to gh-pages under pr-preview/pr-N/ and removes it when the PR closes.
+      - uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: dist
+          comment: false
+
+      - name: Wait for GitHub Pages
+        if: github.event.action != 'closed'
+        env:
+          PREVIEW_URL: ${{ steps.url.outputs.preview }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          for _ in $(seq 1 60); do
+            if [ "$(curl -fsSL "${PREVIEW_URL}playground-sha.txt?t=$(date +%s)" 2>/dev/null)" = "$HEAD_SHA" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Preview did not go live within 10 minutes" >&2
+          exit 1
+
+      - name: Publish deployment and complete check
+        if: github.event.action != 'closed'
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.url.outputs.preview }}
+          CHECK_ID: ${{ steps.check.outputs.id }}
+        with:
+          script: |
+            const url = process.env.PREVIEW_URL;
+            const sha = context.payload.pull_request.head.sha;
+            const { data: deployment } = await github.rest.repos.createDeployment({
+              ...context.repo,
+              ref: sha,
+              environment: 'playground',
+              transient_environment: true,
+              auto_merge: false,
+              required_contexts: [],
+            });
+            await github.rest.repos.createDeploymentStatus({
+              ...context.repo,
+              deployment_id: deployment.id,
+              state: 'success',
+              environment_url: url,
+            });
+            await github.rest.checks.update({
+              ...context.repo,
+              check_run_id: Number(process.env.CHECK_ID),
+              status: 'completed',
+              conclusion: 'success',
+              output: {
+                title: 'Preview ready',
+                summary: `Preview URL: ${url}\n\n[Open Playground](${url})`,
+              },
+            });
+
+      - name: Fail Playground check
+        if: failure() && steps.check.outputs.id
+        uses: actions/github-script@v7
+        env:
+          CHECK_ID: ${{ steps.check.outputs.id }}
+        with:
+          script: |
+            await github.rest.checks.update({
+              ...context.repo,
+              check_run_id: Number(process.env.CHECK_ID),
+              status: 'completed',
+              conclusion: 'failure',
+              output: { title: 'Preview build failed', summary: 'See the workflow logs for details.' },
+            });

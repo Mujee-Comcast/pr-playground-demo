@@ -10,7 +10,7 @@ export function ProfileCard({ user }: { user: User }) {
         </h2>
         <p>{user.company.title}</p>
         <p className="muted">{user.email}</p>
-        <button type="button">Edit Profile</button>
+        <button type="button">Update Profile</button>
       </div>
     </section>
   );
